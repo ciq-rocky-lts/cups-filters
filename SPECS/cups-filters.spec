@@ -11,7 +11,7 @@
 Summary: OpenPrinting CUPS filters and backends
 Name:    cups-filters
 Version: 1.20.0
-Release: 29%{?dist}.3
+Release: 35%{?dist}
 
 # For a breakdown of the licensing, see COPYING file
 # GPLv2:   filters: commandto*, imagetoraster, pdftops, rasterto*,
@@ -27,6 +27,8 @@ License: GPLv2 and GPLv2+ and GPLv3 and GPLv3+ and LGPLv2+ and MIT and BSD with 
 Url:     http://www.linuxfoundation.org/collaborate/workgroups/openprinting/cups-filters
 Source0: http://www.openprinting.org/download/cups-filters/cups-filters-%{version}.tar.xz
 Source1: testprint
+Source2: lftocrlf.ppd
+Source3: lftocrlf
 
 Patch01: cups-filters-createall.patch
 Patch02: cups-filters-brftopagedbrf-install.patch
@@ -63,10 +65,19 @@ Patch14: 0001-cups-browsed-Always-save-.-default-option-entries-fr.patch
 Patch15: cups-browsed-renew.patch
 # 1981612 - [RHEL 8] pdftopdf doesn't handle "page-range=10-2147483647" correctly
 Patch16: 0001-libcupsfilters-Fix-page-range-like-10-in-pdftopdf-fi.patch
-# 2193390 - Edges cropped when printing PostScript document
+# 2185675 - Edges cropped when printing PostScript document
 Patch17: gstoraster-margins.patch
 # CVE-2023-24805 cups-filters: remote code execution in cups-filters, beh CUPS backend
 Patch18: beh-cve2023.patch
+# RHEL-19433 Incorrect PS header handling in gstopdf
+Patch19: 0001-gstoraster-Improved-detection-whether-input-is-PostS.patch
+# RHEL-16034 pdftopdf results with (N > 1)^2 copies if a file is sent to IPP printer with collate
+Patch20: 0001-pdftopdf-Fixed-printing-multiple-copies-on-driverles.patch
+# CVE-2024-47175 cups-filters: remote command injection via attacker controlled data in PPD file
+Patch21: cups-filters-CVE-2024-47175.patch
+# CVE-2024-47076 cups-filters: `cfGetPrinterAttributes` API does not perform sanitization on returned IPP attributes
+Patch22: 0001-cfGetPrinterAttributes5-Validate-response-attributes.patch
+
 
 %if %{with braille}
 Recommends: %{name}-braille%{?_isa} = %{version}-%{release}
@@ -138,14 +149,12 @@ Requires: bc grep sed which
 
 # cups-browsed
 # it needs cups.service for running
-Requires: cups
 Requires(post): systemd
 Requires(preun): systemd
 Requires(postun): systemd
 
-# recommends avahi and cups-ipptool - it is needed for driverless support,
+# recommends cups-ipptool - it is needed for driverless support,
 # but it is useless for older devices and cups servers
-Recommends: avahi
 Recommends: cups-ipptool
 
 # older installations can still have ghostscript-cups and foomatic-filters
@@ -237,10 +246,18 @@ The package provides filters and cups-brf backend needed for braille printing.
 %patch15 -p1 -b .renew
 # 1981612 - [RHEL 8] pdftopdf doesn't handle "page-range=10-2147483647" correctly
 %patch16 -p1 -b .ranges
-# 2193390 - Edges cropped when printing PostScript document
+# 2185675 - Edges cropped when printing PostScript document
 %patch17 -p1 -b .margins
 # CVE-2023-24805 cups-filters: remote code execution in cups-filters, beh CUPS backend
-%patch18 -p1 -b .cve2023
+%patch18 -p1 -b .cve202324805
+# RHEL-19433 Incorrect PS header handling in gstopdf
+%patch19 -p1 -b .gstoraster-psdetect
+# RHEL-16034 pdftopdf results with (N > 1)^2 copies if a file is sent to IPP printer with collate
+%patch20 -p1 -b .pdftopdf-ncopies
+# CVE-2024-47175 cups-filters: remote command injection via attacker controlled data in PPD file
+%patch21 -p1 -b .CVE-2024-47175
+# CVE-2024-47076 cups-filters: `cfGetPrinterAttributes` API does not perform sanitization on returned IPP attributes
+%patch22 -p1 -b .CVE-2024-47076
 
 
 %build
@@ -281,6 +298,11 @@ make %{?_smp_mflags}
 
 %install
 make install DESTDIR=%{buildroot}
+
+# Add textonly driver back, but as lftocrlf
+# part of 2118406 - texttotext filter strips ESC causing PCL files to be printed improperly
+install -p -m 0755 %{SOURCE3} %{buildroot}%{_cups_serverbin}/filter/lftocrlf
+install -p -m 0644 %{SOURCE2} %{buildroot}%{_datadir}/ppd/cupsfilters/lftocrlf.ppd
 
 # Don't ship libtool la files.
 rm -f %{buildroot}%{_libdir}/lib*.la
@@ -326,6 +348,7 @@ then
         sed -i "s/^\s*BrowseRemoteProtocols.*/# added by post scriptlet\nBrowseRemoteProtocols none/" %{_sysconfdir}/cups/cups-browsed.conf
 fi
 
+
 %preun
 %systemd_preun cups-browsed.service
 
@@ -357,6 +380,9 @@ fi
 %attr(0755,root,root) %{_cups_serverbin}/filter/imagetopdf
 %attr(0755,root,root) %{_cups_serverbin}/filter/imagetops
 %attr(0755,root,root) %{_cups_serverbin}/filter/imagetoraster
+# Add textonly driver back, but as lftocrlf
+# part of 2118406 - texttotext filter strips ESC causing PCL files to be printed improperly
+%attr(0755,root,root) %{_cups_serverbin}/filter/lftocrlf
 %attr(0755,root,root) %{_cups_serverbin}/filter/pdftopdf
 %attr(0755,root,root) %{_cups_serverbin}/filter/pdftops
 %attr(0755,root,root) %{_cups_serverbin}/filter/pdftoraster
@@ -451,14 +477,27 @@ fi
 %endif
 
 %changelog
-* Tue Oct 01 2024 Matt Hink <mhink@ciq.com> - 1.20.0-29.3
-- CVE-2024-47176
+* Fri Sep 27 2024 Zdenek Dohnal <zdohnal@redhat.com> - 1.20.0-35
+- CVE-2024-47175 cups-filters: remote command injection via attacker controlled data in PPD file
+- CVE-2024-47076 cups-filters: `cfGetPrinterAttributes` API does not perform sanitization on returned IPP attributes
+- CVE-2024-47176 cups-filters: cups-browsed binds on UDP INADDR_ANY:631 trusting any packet from any source
 
-* Mon May 15 2023 Zdenek Dohnal <zdohnal@redhat.com> - 1.20.0-29.2
+* Mon Feb 26 2024 Zdenek Dohnal <zdohnal@redhat.com> - 1.20.0-34
+- RHEL-13211 redhat-lsb unnecessary pulls in cups and avahi dependencies
+
+* Tue Dec 19 2023 Zdenek Dohnal <zdohnal@redhat.com> - 1.20.0-33
+- RHEL-19433 Incorrect PS header handling in gstopdf
+- RHEL-16034 pdftopdf results with (N > 1)^2 copies if a file is sent to IPP printer with collate
+- RHEL-13211 redhat-lsb unnecessary pulls in cups and avahi dependencies
+
+* Tue Aug 08 2023 Zdenek Dohnal <zdohnal@redhat.com> - 1.20.0-32
+- 2118406 - texttotext filter strips ESC causing PCL files to be printed improperly
+
+* Wed Jun 07 2023 Zdenek Dohnal <zdohnal@redhat.com> - 1.20.0-31
 - CVE-2023-24805 cups-filters: remote code execution in cups-filters, beh CUPS backend
 
-* Fri May 05 2023 Tomas Korbar <tkorbar@redhat.com> - 1.20.0-29.1
-- 2193390 - Edges cropped when printing PostScript document
+* Thu Apr 13 2023 Zdenek Dohnal <zdohnal@redhat.com> - 1.20.0-30
+- 2185675 - Edges cropped when printing PostScript document
 
 * Thu Sep 22 2022 Zdenek Dohnal <zdohnal@redhat.com> - 1.20.0-29
 - 2128539 - build braille subpackage only on Fedora and CentOS Stream > 9
