@@ -11,7 +11,7 @@
 Summary: OpenPrinting CUPS filters and backends
 Name:    cups-filters
 Version: 1.20.0
-Release: 29%{?dist}.2
+Release: 29%{?dist}.3
 
 # For a breakdown of the licensing, see COPYING file
 # GPLv2:   filters: commandto*, imagetoraster, pdftops, rasterto*,
@@ -274,6 +274,7 @@ The package provides filters and cups-brf backend needed for braille printing.
 %else
            --disable-braille \
 %endif
+           --with-browseremoteprotocols=none\
            --enable-auto-setup-driverless
 
 make %{?_smp_mflags}
@@ -318,6 +319,13 @@ make check
 %post
 %systemd_post cups-browsed.service
 
+# Set BrowseRemoteProtocols to none in light of CVE-2024-47176
+if ! grep -Fxq "# added by post scriptlet" %{_sysconfdir}/cups/cups-browsed.conf
+then
+        cp %{_sysconfdir}/cups/cups-browsed.conf %{_sysconfdir}/cups/cups-browsed.conf.rpmsave
+        sed -i "s/^\s*BrowseRemoteProtocols.*/# added by post scriptlet\nBrowseRemoteProtocols none/" %{_sysconfdir}/cups/cups-browsed.conf
+fi
+
 %preun
 %systemd_preun cups-browsed.service
 
@@ -333,7 +341,7 @@ make check
 %{_pkgdocdir}/README
 %{_pkgdocdir}/AUTHORS
 %{_pkgdocdir}/NEWS
-%config(noreplace) %{_sysconfdir}/cups/cups-browsed.conf
+%config(noreplace) %verify(not size filedigest mtime) %{_sysconfdir}/cups/cups-browsed.conf
 %attr(0755,root,root) %{_cups_serverbin}/backend/parallel
 # Serial backend needs to run as root (bug #212577#c4).
 %attr(0700,root,root) %{_cups_serverbin}/backend/serial
@@ -443,6 +451,9 @@ make check
 %endif
 
 %changelog
+* Tue Oct 01 2024 Matt Hink <mhink@ciq.com> - 1.20.0-29.3
+- CVE-2024-47176
+
 * Mon May 15 2023 Zdenek Dohnal <zdohnal@redhat.com> - 1.20.0-29.2
 - CVE-2023-24805 cups-filters: remote code execution in cups-filters, beh CUPS backend
 
