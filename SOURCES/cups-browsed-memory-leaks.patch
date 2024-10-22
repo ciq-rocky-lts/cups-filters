@@ -1,0 +1,36 @@
+diff --git a/utils/cups-browsed.c b/utils/cups-browsed.c
+index 2cc64dd..e3f5cca 100644
+--- a/utils/cups-browsed.c
++++ b/utils/cups-browsed.c
+@@ -2471,7 +2471,8 @@ on_printer_state_changed (CupsNotifier *object,
+   char *ptr, buf[1024];
+   remote_printer_t *p, *q;
+   http_t *http = NULL;
+-  ipp_t *request, *response;
++  ipp_t *request = NULL;
++  ipp_t *response = NULL;
+   ipp_attribute_t *attr;
+   const char *pname = NULL;
+   ipp_pstate_t pstate = IPP_PRINTER_IDLE;
+@@ -2733,6 +2734,10 @@ on_printer_state_changed (CupsNotifier *object,
+ 		  break;
+ 		}
+ 	      }
++              if (response) {
++                ippDelete(response);
++                response = NULL;
++              }
+ 	      if (pstate == IPP_PRINTER_IDLE && paccept) {
+ 		q->last_printer = i;
+ 		break;
+@@ -3640,8 +3645,8 @@ gboolean handle_cups_queues(gpointer unused) {
+       /* Default option settings from printer entry */
+       for (i = 0; i < p->num_options; i ++)
+ 	if (strcasecmp(p->options[i].name, "printer-is-shared"))
+-	  num_options = cupsAddOption(strdup(p->options[i].name),
+-				      strdup(p->options[i].value),
++	  num_options = cupsAddOption(p->options[i].name,
++				      p->options[i].value,
+ 				      num_options, &options);
+       /* Encode option list into IPP attributes */
+       cupsEncodeOptions2(request, num_options, options, IPP_TAG_PRINTER);

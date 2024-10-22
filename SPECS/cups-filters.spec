@@ -1,0 +1,524 @@
+# we build CUPS also with relro
+%global _hardened_build 1
+
+Summary: OpenPrinting CUPS filters and backends
+Name:    cups-filters
+Version: 1.0.35
+Release: 29%{?dist}.1
+
+# For a breakdown of the licensing, see COPYING file
+# GPLv2:   filters: commandto*, imagetoraster, pdftops, rasterto*,
+#                   imagetopdf, pstopdf, texttopdf
+#         backends: parallel, serial
+# GPLv2+:  filters: textonly, texttops, imagetops
+# GPLv3:   filters: bannertopdf
+# GPLv3+:  filters: urftopdf
+# LGPLv2+:   utils: cups-browsed
+# MIT:     filters: pdftoijs, pdftoopvp, pdftopdf, pdftoraster
+License: GPLv2 and GPLv2+ and GPLv3 and GPLv3+ and LGPLv2+ and MIT
+
+Group:   System Environment/Base
+Url:     http://www.linuxfoundation.org/collaborate/workgroups/openprinting/cups-filters
+Source0: http://www.openprinting.org/download/cups-filters/cups-filters-%{version}.tar.xz
+
+# source files from cups-filters-1.13.4 for partial rebase of cups-browsed and introducing
+# implicitclass backend for high availability and load balancing
+Source1: backend.tar.gz
+Source2: m4.tar.gz
+Source3: utils.tar.gz
+Source4: configure.ac
+Source5: Makefile.am
+
+Patch1:  cups-filters-page-label.patch
+Patch2:  cups-filters-filter-costs.patch
+Patch3:  cups-filters-urftopdf.patch
+Patch4:  cups-filters-format-mismatch.patch
+Patch5:  cups-filters-pdf-landscape.patch
+Patch6:  cups-filters-pdftoopvp.patch
+Patch7:  cups-filters-CVE-2013-6475.patch
+Patch8:  cups-filters-poppler023.patch
+Patch9:  cups-filters-CVE-2015-3258-3279.patch
+# fixed covscan issues from upstream
+Patch10: 0001-Fixing-covscan-issues.patch
+# badly fixed coverity issue (bug #1700333)
+Patch11: 0001-cups-browsed-Fixed-freeing-of-literal-string-caused-.patch
+# bad paths in manpages (bug #1508018)
+Patch12: cups-filters-manpages.patch
+# 1775776 - Updated cups-browsed in RHEL 7.7 leaks sockets
+Patch13: cups-browsed-socket-leak.patch
+# 1816109 - Queues are not cleaned up after stopping cups-browsed
+Patch14: 0001-cups-browsed-Removing-CUPS-array-element-from-within.patch
+# 1811190 - cups-browsed leaks memory
+Patch15: cups-browsed-memory-leaks.patch
+# 1812635 - RHEL 7.7. cups-browsed segfaults on shutdown
+Patch16: cups-filters-deleted-master.patch
+# 1894301 - cups-browsed segfaults when accessing freed master queue in print queue cluster
+Patch17: cups-browsed-remove-entry.patch
+
+Requires: cups-filters-libs%{?_isa} = %{version}-%{release}
+
+# Obsolete cups-php (bug #971741)
+Obsoletes: cups-php < 1:1.6.0-1
+# Don't Provide it because we don't build the php module
+#Provides: cups-php = 1:1.6.0-1
+
+BuildRequires: cups-devel
+# pdftopdf
+BuildRequires: qpdf-devel
+# pdftops
+BuildRequires: poppler-utils
+# pdftoijs, pdftoopvp, pdftoraster
+BuildRequires: poppler-devel poppler-cpp-devel
+BuildRequires: libjpeg-devel
+BuildRequires: libpng-devel
+BuildRequires: libtiff-devel
+BuildRequires: zlib-devel
+# libijs
+BuildRequires: ghostscript-devel
+BuildRequires: freetype-devel
+BuildRequires: fontconfig-devel
+BuildRequires: lcms2-devel
+# cups-browsed
+BuildRequires: avahi-devel avahi-glib-devel
+BuildRequires: systemd
+
+# Make sure we get postscriptdriver tags.
+BuildRequires: python-cups
+
+# autogen.sh
+BuildRequires: autoconf
+BuildRequires: automake
+BuildRequires: libtool
+
+# gdbus-codegen is used in Makefile.am for generating cups-notifier code,
+# so we need glib2-devel
+BuildRequires: glib2-devel
+
+# dbus-devel is needed for new dbus CMS functionality
+BuildRequires: dbus-devel
+
+Requires: cups-filesystem
+Requires: poppler-utils
+
+# texttopdf
+Requires: liberation-mono-fonts
+
+# pstopdf
+Requires: bc grep sed which
+
+# cups-browsed
+Requires(post): systemd
+Requires(preun): systemd
+Requires(postun): systemd
+
+%package libs
+Summary: OpenPrinting CUPS filters and backends - cupsfilters and fontembed libraries
+Group:   System Environment/Libraries
+# LGPLv2: libcupsfilters
+# MIT:    libfontembed
+License: LGPLv2 and MIT
+
+%package devel
+Summary: OpenPrinting CUPS filters and backends - development environment
+Group:   Development/Libraries
+License: LGPLv2 and MIT
+Requires: cups-filters-libs%{?_isa} = %{version}-%{release}
+
+%description
+Contains backends, filters, and other software that was
+once part of the core CUPS distribution but is no longer maintained by
+Apple Inc. In addition it contains additional filters developed
+independently of Apple, especially filters for the PDF-centric printing
+workflow introduced by OpenPrinting.
+
+%description libs
+This package provides cupsfilters and fontembed libraries.
+
+%description devel
+This is the development package for OpenPrinting CUPS filters and backends.
+
+%prep
+# untar m4.tar.gz, backend.tar.gz and utils.tar.gz after untaring main source
+# tarball and going into the it
+%setup -q -a 1 -a 2 -a 3
+
+# copy configure.ac and Makefile.am into untared directory
+cp %{SOURCE4} .
+cp %{SOURCE5} .
+
+# Added support for page-label (bug #987515).
+%patch1 -p1 -b .page-label
+
+# Upstream patch to re-work filter costs (bug #998981).
+%patch2 -p1 -b .filter-costs
+
+# Don't ship urftopdf for now (bug #1002947).
+%patch3 -p1 -b .urftopdf
+
+# Fixes for some printf-type format mismatches (bug #1003035).
+%patch4 -p1 -b .format-mismatch
+
+# Fix PDF landscape printing (bug #1018313).
+%patch5 -p1 -b .pdf-landscape
+
+# Don't ship pdftoopvp for now (bug #1027557).
+%patch6 -p1 -b .pdftoopvp
+
+# Apply CVE-2013-6475 to pdftoopvp even though we don't ship it
+# (bug #1052741).
+%patch7 -p1 -b .CVE-2013-6475
+
+# Build against newer poppler (bug #1217552).
+%patch8 -p1 -b .poppler023
+
+# Fix heap-based buffer overflow in texttopdf filter (bug #1194263,
+# CVE-2015-3258, CVE-2015-3279).
+%patch9 -p1 -b .CVE-2015-3258-3279
+
+# fixed covscan issues from upstream
+%patch10 -p1 -b .covscan
+
+# 1700333 - [abrt] [faf] cups-filters: raise(): /usr/sbin/cups-browsed killed by 6
+%patch11 -p1 -b .abrt-during-restart
+
+# 1508018 - man pages: wrong links in man cups-browsed
+%patch12 -p1 -b .manpages
+
+# 1775776 - Updated cups-browsed in RHEL 7.7 leaks sockets
+%patch13 -p1 -b .cups-browsed-socket-leak
+
+# 1816109 - Queues are not cleaned up after stopping cups-browsed
+%patch14 -p1 -b .clean-up-queues
+
+# 1811190 - cups-browsed leaks memory
+%patch15 -p1 -b .memory-leaks
+
+# 1812635 - RHEL 7.7. cups-browsed segfaults on shutdown
+%patch16 -p1 -b .deleted-master
+
+# 1894301 - cups-browsed segfaults when accessing freed master queue in print queue cluster
+%patch17 -p1 -b .remove-entry
+
+%build
+# work-around Rpath
+./autogen.sh
+
+# --with-pdftops=pdftops - use Poppler instead of Ghostscript (see README)
+# --with-rcdir=no - don't install SysV init script
+%configure --disable-static \
+           --disable-silent-rules \
+           --with-pdftops=pdftops \
+           --with-rcdir=no \
+           --with-browseremoteprotocols=none
+
+make %{?_smp_mflags}
+
+%install
+make install DESTDIR=%{buildroot}
+
+# https://fedoraproject.org/wiki/Packaging_tricks#With_.25doc
+mkdir __doc
+mv  %{buildroot}%{_datadir}/doc/cups-filters/* __doc
+rm -rf %{buildroot}%{_datadir}/doc/cups-filters
+
+# Don't ship libtool la files.
+rm -f %{buildroot}%{_libdir}/lib*.la
+
+# Not sure what is this good for.
+rm -f %{buildroot}%{_bindir}/ttfread
+
+# systemd unit file
+mkdir -p %{buildroot}%{_unitdir}
+install -p -m 644 utils/cups-browsed.service %{buildroot}%{_unitdir}
+
+%post
+%systemd_post cups-browsed.service
+
+# Initial installation
+if [ $1 -eq 1 ] ; then
+    IN=%{_sysconfdir}/cups/cupsd.conf
+    OUT=%{_sysconfdir}/cups/cups-browsed.conf
+    keyword=BrowsePoll
+
+    # We can remove this after few releases, it's just for the introduction of cups-browsed.
+    if [ -f "$OUT" ]; then
+        echo -e "\n# NOTE: This file is not part of CUPS. You need to start & enable cups-browsed service." >> "$OUT"
+    fi
+
+    # move BrowsePoll from cupsd.conf to cups-browsed.conf
+    if [ -f "$IN" ] && grep -iq ^$keyword "$IN"; then
+        if ! grep -iq ^$keyword "$OUT"; then
+            (cat >> "$OUT" <<EOF
+
+# Settings automatically moved from cupsd.conf by RPM package:
+EOF
+            ) || :
+            (grep -i ^$keyword "$IN" >> "$OUT") || :
+            #systemctl enable cups-browsed.service >/dev/null 2>&1 || :
+        fi
+        sed -i -e "s,^$keyword,#$keyword directive moved to cups-browsed.conf\n#$keyword,i" "$IN" || :
+    fi
+fi
+
+# Set BrowseRemoteProtocols to none in light of CVE-2024-47176
+if ! grep -Fxq "# added by post scriptlet" %{_sysconfdir}/cups/cups-browsed.conf
+then
+        cp %{_sysconfdir}/cups/cups-browsed.conf %{_sysconfdir}/cups/cups-browsed.conf.rpmsave
+        sed -i "s/^\s*BrowseRemoteProtocols.*/# added by post scriptlet\nBrowseRemoteProtocols none/" %{_sysconfdir}/cups/cups-browsed.conf
+fi
+
+%preun
+%systemd_preun cups-browsed.service
+
+%postun
+%systemd_postun_with_restart cups-browsed.service 
+
+%post libs -p /sbin/ldconfig
+
+%postun libs -p /sbin/ldconfig
+
+
+%files
+%doc __doc/README __doc/AUTHORS __doc/NEWS
+%config(noreplace) %verify(not size filedigest mtime) %{_sysconfdir}/cups/cups-browsed.conf
+%attr(0755,root,root) %{_cups_serverbin}/filter/*
+%attr(0755,root,root) %{_cups_serverbin}/backend/parallel
+%attr(0755,root,root) %{_cups_serverbin}/backend/implicitclass
+# Serial backend needs to run as root (bug #212577#c4).
+%attr(0700,root,root) %{_cups_serverbin}/backend/serial
+%{_datadir}/cups/banners
+%{_datadir}/cups/charsets
+%{_datadir}/cups/data/*
+# this needs to be in the main package because of cupsfilters.drv
+%{_datadir}/cups/ppdc/pcl.h
+%{_datadir}/cups/drv/cupsfilters.drv
+%{_datadir}/cups/mime/cupsfilters.types
+%{_datadir}/cups/mime/cupsfilters.convs
+%{_datadir}/ppd/cupsfilters
+%{_sbindir}/cups-browsed
+%{_unitdir}/cups-browsed.service
+%{_mandir}/man8/cups-browsed.8.gz
+%{_mandir}/man5/cups-browsed.conf.5.gz
+
+%files libs
+%doc __doc/COPYING fontembed/README
+%attr(0755,root,root) %{_libdir}/libcupsfilters.so.*
+%attr(0755,root,root) %{_libdir}/libfontembed.so.*
+
+%files devel
+%{_includedir}/cupsfilters
+%{_includedir}/fontembed
+%{_libdir}/pkgconfig/libcupsfilters.pc
+%{_libdir}/pkgconfig/libfontembed.pc
+%{_libdir}/libcupsfilters.so
+%{_libdir}/libfontembed.so
+
+%changelog
+* Tue Oct 1 2024 Matt Hink <mhink@ciq.com> - 1.0.35-29.1
+- CVE-2024-47176
+
+* Tue May 17 2022 Zdenek Dohnal <zdohnal@redhat.com> - 1.0.35-29
+- 1894301 - cups-browsed segfaults when accessing freed master queue in print queue cluster
+
+* Tue Mar 24 2020 Zdenek Dohnal <zdohnal@redhat.com> - 1.0.35-28
+- 1812635 - RHEL 7.7. cups-browsed segfaults on shutdown
+
+* Mon Mar 23 2020 Zdenek Dohnal <zdohnal@redhat.com> - 1.0.35-28
+- 1816109 - Queues are not cleaned up after stopping cups-browsed
+- 1811190 - cups-browsed leaks memory
+
+* Mon Nov 25 2019 Zdenek Dohnal <zdohnal@redhat.com> - 1.0.35-27
+- 1775776 - Updated cups-browsed in RHEL 7.7 leaks sockets
+
+* Tue May 21 2019 Zdenek Dohnal <zdohnal@redhat.com> - 1.0.35-26
+- 1508018 - man pages: wrong links in man cups-browsed
+
+* Wed Apr 17 2019 Zdenek Dohnal <zdohnal@redhat.com> - 1.0.35-25
+- 1700333 - [abrt] [faf] cups-filters: raise(): /usr/sbin/cups-browsed killed by 6
+
+* Mon Mar 18 2019 Zdenek Dohnal <zdohnal@redhat.com> - 1.0.35-24
+- fixing covscan issues, backported from upstream - 1485502
+
+* Wed Feb 20 2019 Zdenek Dohnal <zdohnal@redhat.com> - 1.0.35-23
+- 1485502 - Rebase cups-browsed to latest version in upstream cups-filters
+
+* Thu Mar 02 2017 Zdenek Dohnal <zdohnal@redhat.com> - 1.0.35-22
+- 1427690 - /usr/lib/cups/filter/pstopdf: line 17: which: command not found
+
+* Thu Jul  9 2015 Tim Waugh <twaugh@redhat.com> - 1.0.35-21
+- Fix heap-based buffer overflow in texttopdf filter (bug #1241242,
+  CVE-2015-3258, CVE-2015-3279).
+
+* Thu Jun 25 2015 Tim Waugh <twaugh@redhat.com> - 1.0.35-20
+- Improvements to cups-browsed efficiency patch (bug #1191691).
+
+* Mon Jun 22 2015 Tim Waugh <twaugh@redhat.com> - 1.0.35-18
+- Fix segfault in texttopdf filter (bug #1194263).
+- Improve cups-browsed efficiency (bug #1191691).
+- Fetch printer descriptions with cups-browsed (bug #1223719).
+- Fix cups-browsed "_" handling for printer names (bug #1167408).
+
+* Tue Jun 16 2015 Tim Waugh <twaugh@redhat.com> - 1.0.35-17
+- Build against newer poppler (bug #1217552).
+
+* Wed Oct  8 2014 Tim Waugh <twaugh@redhat.com> - 1.0.35-16
+- Applied upstream patch to fix BrowseAllow parsing issue
+  (CVE-2014-4338, bug #1091568).
+- Applied upstream patch for cups-browsed DoS via
+  process_browse_data() out-of-bounds read (CVE-2014-4337,
+  bug #1111510).
+
+* Fri Mar 28 2014 Tim Waugh <twaugh@redhat.com> - 1.0.35-15
+- The texttopdf filter requires a TrueType monospaced font
+  (bug #1070729).
+
+* Fri Jan 24 2014 Daniel Mach <dmach@redhat.com> - 1.0.35-14
+- Mass rebuild 2014-01-24
+
+* Mon Jan 20 2014 Tim Waugh <twaugh@redhat.com> - 1.0.35-13
+- Apply CVE-2013-6475 to pdftoopvp even though we don't ship it
+  (bug #1052741).
+
+* Fri Dec 27 2013 Daniel Mach <dmach@redhat.com> - 1.0.35-12
+- Mass rebuild 2013-12-27
+
+* Fri Nov  8 2013 Tim Waugh <twaugh@redhat.com> - 1.0.35-11
+- Don't ship pdftoopvp for now (bug #1027557).
+
+* Wed Oct 16 2013 Tim Waugh <twaugh@redhat.com> - 1.0.35-10
+- Fix PDF landscape printing (bug #1018313).
+
+* Tue Oct  1 2013 Tim Waugh <twaugh@redhat.com> - 1.0.35-9
+- Fixes for some printf-type format mismatches (bug #1003035).
+
+* Fri Aug 30 2013 Tim Waugh <twaugh@redhat.com> - 1.0.35-8
+- Don't ship urftopdf for now (bug #1002947).
+
+* Wed Aug 21 2013 Tim Waugh <twaugh@redhat.com> - 1.0.35-7
+- Upstream patch to re-work filter costs (bug #998981). No longer need
+  text filter costs patch as paps gets used by default now if
+  installed.
+
+* Tue Jul 30 2013 Tim Waugh <twaugh@redhat.com> - 1.0.35-6
+- Set cost for text filters to 200 so that the paps filter gets
+  preference for the time being (bug #988909).
+
+* Wed Jul 24 2013 Tim Waugh <twaugh@redhat.com> - 1.0.35-5
+- Handle page-label when printing n-up as well.
+
+* Tue Jul 23 2013 Tim Waugh <twaugh@redhat.com> - 1.0.35-4
+- Added support for page-label (bug #987515).
+
+* Thu Jul 11 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.35-3
+- Rebuild (qpdf-5.0.0)
+
+* Mon Jul 01 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.35-2
+- add cups-browsed(8) and cups-browsed.conf(5)
+- don't reverse lookup IP address in URI (#975822)
+
+* Wed Jun 26 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.35-1
+- 1.0.35
+
+* Mon Jun 24 2013 Marek Kasik <mkasik@redhat.com> - 1.0.34-9
+- Rebuild (poppler-0.22.5)
+
+* Wed Jun 19 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.34-8
+- fix the note we add in cups-browsed.conf
+
+* Wed Jun 12 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.34-7
+- Obsolete cups-php (#971741)
+
+* Wed Jun 05 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.34-6
+- one more cups-browsed leak fixed (#959682)
+
+* Wed Jun 05 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.34-5
+- perl is actually not required by pstopdf, because the calling is in dead code
+
+* Mon Jun 03 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.34-4
+- fix resource leaks and other problems found by Coverity & Valgrind (#959682)
+
+* Wed May 15 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.34-3
+- ship ppdc/pcl.h because of cupsfilters.drv
+
+* Tue May 07 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.34-2
+- pstopdf requires bc (#960315)
+
+* Thu Apr 11 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.34-1
+- 1.0.34
+
+* Fri Apr 05 2013 Fridolin Pokorny <fpokorny@redhat.com> - 1.0.33-1
+- 1.0.33
+- removed cups-filters-1.0.32-null-info.patch, accepted by upstream
+
+* Thu Apr 04 2013 Fridolin Pokorny <fpokorny@redhat.com> - 1.0.32-2
+- fixed segfault when info is NULL
+
+* Thu Apr 04 2013 Fridolin Pokorny <fpokorny@redhat.com> - 1.0.32-1
+- 1.0.32
+
+* Fri Mar 29 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.31-3
+- add note to cups-browsed.conf
+
+* Thu Mar 28 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.31-2
+- check cupsd.conf existence prior to grepping it (#928816)
+
+* Fri Mar 22 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.31-1
+- 1.0.31
+
+* Tue Mar 19 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.30-4
+- revert previous change
+
+* Wed Mar 13 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.30-3
+- don't ship banners for now (#919489)
+
+* Tue Mar 12 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.30-2
+- move BrowsePoll from cupsd.conf to cups-browsed.conf in %%post
+
+* Fri Mar 08 2013 Jiri Popelka <jpopelka@redhat.com> - 1.0.30-1
+- 1.0.30: CUPS browsing and broadcasting in cups-browsed
+
+* Wed Feb 13 2013 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.0.29-4
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_19_Mass_Rebuild
+
+* Sat Jan 19 2013 Rex Dieter <rdieter@fedoraproject.org> 1.0.29-3
+- backport upstream buildfix for poppler-0.22.x
+
+* Fri Jan 18 2013 Adam Tkac <atkac redhat com> - 1.0.29-2
+- rebuild due to "jpeg8-ABI" feature drop
+
+* Thu Jan 03 2013 Jiri Popelka <jpopelka@redhat.com> 1.0.29-1
+- 1.0.29
+
+* Wed Jan 02 2013 Jiri Popelka <jpopelka@redhat.com> 1.0.28-1
+- 1.0.28: cups-browsed daemon and service
+
+* Thu Nov 29 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.25-1
+- 1.0.25
+
+* Fri Sep 07 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.24-1
+- 1.0.24
+
+* Wed Aug 22 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.23-1
+- 1.0.23: old pdftopdf removed
+
+* Tue Aug 21 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.22-1
+- 1.0.22: new pdftopdf (uses qpdf instead of poppler)
+
+* Wed Aug 08 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.20-4
+- rebuild
+
+* Thu Aug 02 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.20-3
+- commented multiple licensing breakdown (#832130)
+- verbose build output
+
+* Thu Aug 02 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.20-2
+- BuildRequires: poppler-cpp-devel (to build against poppler-0.20)
+
+* Mon Jul 23 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.20-1
+- 1.0.20
+
+* Tue Jul 17 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.19-1
+- 1.0.19
+
+* Wed May 30 2012 Jiri Popelka <jpopelka@redhat.com> 1.0.18-1
+- initial spec file

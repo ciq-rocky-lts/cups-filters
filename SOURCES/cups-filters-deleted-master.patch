@@ -1,0 +1,61 @@
+diff -up cups-filters-1.0.35/utils/cups-browsed.c.deleted-master cups-filters-1.0.35/utils/cups-browsed.c
+--- cups-filters-1.0.35/utils/cups-browsed.c.deleted-master	2020-03-24 12:39:38.535487257 +0100
++++ cups-filters-1.0.35/utils/cups-browsed.c	2020-03-24 12:39:38.538487233 +0100
+@@ -358,6 +358,7 @@ static unsigned int CreateRemoteCUPSPrin
+ static int NewIPPPrinterQueuesShared = 0;
+ static load_balancing_type_t LoadBalancingType = QUEUE_ON_CLIENT;
+ static const char *DefaultOptions = NULL;
++static remote_printer_t *deleted_master = NULL;
+ static int terminating = 0; /* received SIGTERM, ignore callbacks,
+ 			       break loops */
+ static int in_shutdown = 0;
+@@ -3179,6 +3180,30 @@ gboolean handle_cups_queues(gpointer unu
+   const char *customval;
+   const char *val = NULL;
+ 
++  /* Create dummy entry to point slaves at when their master is about to
++     get removed now (if we point them to NULL, we would try to remove
++     the already removed CUPS queue again when it comes to the removal
++     of the slave. */
++  if (deleted_master == NULL) {
++    if ((deleted_master =
++	 (remote_printer_t *)calloc(1, sizeof(remote_printer_t))) == NULL) {
++      debug_printf("ERROR: Unable to allocate memory.\n");
++      if (in_shutdown == 0)
++	recheck_timer ();
++      return FALSE;
++    }
++    memset(deleted_master, 0, sizeof(remote_printer_t));
++    deleted_master->uri = "<DELETED>";
++  }
++
++  /* Now redirect the slave_of pointers of the masters which get deleted now
++     to this dummy entry */
++  for (p = (remote_printer_t *)cupsArrayFirst(remote_printers);
++       p; p = (remote_printer_t *)cupsArrayNext(remote_printers))
++    if (p->status == STATUS_DISAPPEARED &&
++        (q = p->duplicate_of) != NULL && q->status == STATUS_DISAPPEARED )
++      p->duplicate_of = deleted_master;
++
+   debug_printf("Processing printer list ...\n");
+   for (p = (remote_printer_t *)cupsArrayFirst(remote_printers);
+        p; p = (remote_printer_t *)cupsArrayNext(remote_printers)) {
+@@ -3303,7 +3328,8 @@ gboolean handle_cups_queues(gpointer unu
+       } else {
+ 	/* "master printer" of this duplicate */
+ 	q = p->duplicate_of;
+-	if (q->status != STATUS_DISAPPEARED) {
++        /* Don't update the deleted master */
++	if (q != deleted_master && q->status != STATUS_DISAPPEARED) {
+ 	  debug_printf("Removed duplicate printer %s on %s:%d, scheduling its master printer %s on host %s, port %d for update.\n",
+ 		       p->name, p->host, p->port, q->name, q->host, q->port);
+ 	  /* Schedule for update */
+@@ -6915,6 +6941,8 @@ fail:
+   if (debug_logfile == 1)
+     stop_debug_logging();
+   
++  if (deleted_master != NULL)
++    free(deleted_master);
+   if (DefaultOptions != NULL)
+     free(DefaultOptions);
+   if (DomainSocket != NULL)
