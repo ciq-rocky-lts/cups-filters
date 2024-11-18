@@ -4,7 +4,7 @@
 Summary: OpenPrinting CUPS filters and backends
 Name:    cups-filters
 Version: 1.0.35
-Release: 29%{?dist}.1
+Release: 29%{?dist}.2
 
 # For a breakdown of the licensing, see COPYING file
 # GPLv2:   filters: commandto*, imagetoraster, pdftops, rasterto*,
@@ -54,6 +54,8 @@ Patch15: cups-browsed-memory-leaks.patch
 Patch16: cups-filters-deleted-master.patch
 # 1894301 - cups-browsed segfaults when accessing freed master queue in print queue cluster
 Patch17: cups-browsed-remove-entry.patch
+# Fix CVE-2024-47175 and CVE-2024-47076
+Patch18: cups-filters-CVE-2024-47175-CVE-2024-47076.patch
 
 Requires: cups-filters-libs%{?_isa} = %{version}-%{release}
 
@@ -199,6 +201,8 @@ cp %{SOURCE5} .
 # 1894301 - cups-browsed segfaults when accessing freed master queue in print queue cluster
 %patch17 -p1 -b .remove-entry
 
+%patch18 -p1 -b .CVE-2024-47175
+
 %build
 # work-around Rpath
 ./autogen.sh
@@ -314,6 +318,10 @@ fi
 %{_libdir}/libfontembed.so
 
 %changelog
+* Mon Nov 18 2024 Jonathan Dieter <jdieter@ciq.com> - 1.0.35-29.2
+- CVE-2024-47076
+- CVE-2024-47175
+
 * Tue Oct 1 2024 Matt Hink <mhink@ciq.com> - 1.0.35-29.1
 - CVE-2024-47176
 
